@@ -1,0 +1,391 @@
+#!/usr/local/bin/python3
+#
+# Copyright 2022 Michael Graves <mg@brainfat.net>
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+# 
+#     1. Redistributions of source code must retain the above copyright notice,
+#        this list of conditions and the following disclaimer.
+# 
+#     2. Redistributions in binary form must reproduce the above copyright
+#        notice, this list of conditions and the following disclaimer in the
+#        documentation and/or other materials provided with the distribution.
+# 
+#     3. Neither the name of the copyright holder nor the names of its
+#        contributors may be used to endorse or promote products derived from
+#        this software without specific prior written permission.
+# 
+#     THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+#     "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+#     TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+#     A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+#     HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+#     SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+#     LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF
+#     USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+#     ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+#     OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+#     OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+#     SUCH DAMAGE.
+#
+
+
+from libipam import ipam
+import http.server
+import sys
+import os
+import configparser
+import re
+import json
+import logging
+import daemon
+import signal
+from pwd import getpwnam
+
+db = None
+api_key = None
+logger = None
+
+# extend HTTPServer so we can store the key and dbhandle
+class IPAMDServer(http.server.HTTPServer):
+    dbhandle = None
+    api_key = None
+
+class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
+    def _parse_path(self, path):
+        pathre = re.compile("/api/([^/]+)(?:/([^/]+))?(?:/(.+))?", re.IGNORECASE)
+        m = pathre.match(path)
+        if m == None:
+            return((None,None,None))
+        return(m.groups())
+
+    def _check_api_key(self):
+        client_key = None
+        if "Authorization" in self.headers:
+            client_key = self.headers["Authorization"]
+        else:
+#            print(f'client api key missing')
+            return False
+        if self.server.api_key == client_key:
+            return True
+#        print(f'client api key mismatch "{client_key}"')
+        return False
+
+    def _clean_intvalue(self, arr):
+        ret = []
+        for r in arr:
+            if "intvalue" in r:
+                del r["intvalue"]
+            ret.append(r)
+        return(ret)
+
+    # show resources(s)
+    def do_GET(self):
+        if not self._check_api_key():
+            self.send_response(401)
+            self.end_headers()
+            return
+        (resource, name, extra) = self._parse_path(self.path)
+        rc = 200
+        res = { 'status': None, 'msg': None, 'resource': None, 'records': None }
+        if resource in ["domain", "domains"]:
+            try:
+                val = self.server.dbhandle.find_domain(name)
+                res['resource'] = "domain"
+                res['status'] = "success"
+                res['records'] = val
+            except Exception as e:
+                rc = 406
+                res['status'] = "error"
+                res['msg'] = f'{e}'
+        elif resource in ["record", "records"]:
+            try:
+                val = self.server.dbhandle.find_record(name)
+                val = self._clean_intvalue(val)
+                res['resource'] = "record"
+                res['status'] = "success"
+                res['records'] = val
+            except Exception as e:
+                rc = 406
+                res['status'] = "error"
+                res['msg'] = f'{e}'
+        elif resource in ["network"]:
+            try:
+                val = self.server.dbhandle.find_network(name+"/"+extra)
+                val = self._clean_intvalue(val)
+                res['resource'] = "network"
+                res['status'] = "success"
+                res['records'] = val
+            except Exception as e:
+                rc = 406
+                res['status'] = "error"
+                res['msg'] = f'{e}'
+        elif resource in ["address"]:
+            try:
+                val = self.server.dbhandle.find_address(name)
+                val = self._clean_intvalue(val)
+                res['resource'] = "address"
+                res['status'] = "success"
+                res['records'] = val
+            except Exception as e:
+                rc = 406
+                res['status'] = "error"
+                res['msg'] = f'{e}'
+        else:
+            rc = 400
+            res['status'] = "error"
+            res['msg'] = f'unknown resource type: {resource}'
+        self.send_response(rc)
+        self.send_header("Content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(bytes(json.dumps(res),"utf-8"))
+
+    # add resource
+    def do_POST(self):
+        if not self._check_api_key():
+            self.send_response(401)
+            self.end_headers()
+            return
+        (resource, name, extra) = self._parse_path(self.path)
+        res = { 'status': None, 'msg': None, 'resource': None, 'records': None }
+        content_len = int(self.headers['Content-Length'])
+        data = self.rfile.read(content_len)
+        rc = 200
+        req = None
+        try:
+            req = json.loads(data)
+            if resource in ["domain", "domains"]:
+                try:
+                    val = self.server.dbhandle.add_domain(req['fqdn'],options=req['options'])
+                    res['resource'] = "domain"
+                    res['status'] = "success"
+                    res['records'] = val
+                except Exception as e:
+                    rc = 406
+                    res['status'] = "error"
+                    res['msg'] = f'{e}'
+            elif resource in ["record", "records"]:
+                try:
+                    val = self.server.dbhandle.add_record(req['fqdn'],req['rr_type'],req['value'],options=req['options'])
+                    val = self._clean_intvalue(val)
+                    res['resource'] = "record"
+                    res['status'] = "success"
+                    res['records'] = val
+                except Exception as e:
+                    rc = 406
+                    res['status'] = "error"
+                    res['msg'] = f'{e}'
+            else:
+                rc = 400
+                res['status'] = "error"
+                res['msg'] = f'unknown resource type: {resource}'
+        except Exception as e:
+            rc = 406
+            res['status'] = "error"
+            res['msg'] = f'{e}'
+        self.send_response(rc)
+        self.send_header("Content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(bytes(json.dumps(res),"utf-8"))
+
+    def do_PUT(self):
+        if not self._check_api_key():
+            self.send_response(401)
+            self.end_headers()
+            return
+        (resource, name, extra) = self._parse_path(self.path)
+        res = { 'status': None, 'msg': None, 'resource': None, 'records': None }
+        content_len = int(self.headers['Content-Length'])
+        data = self.rfile.read(content_len)
+        rc = 200
+        req = None
+        try:
+            req = json.loads(data)
+            if resource in ["domain", "domains"]:
+                try:
+                    val = self.server.dbhandle.update_domain(req['fqdn'],options=req['options'])
+                    res['resource'] = "domain"
+                    res['status'] = "success"
+                    res['records'] = val
+                except Exception as e:
+                    rc = 406
+                    res['status'] = "error"
+                    res['msg'] = f'{e}'
+            elif resource in ["record", "records"]:
+                try:
+                    val = self.server.dbhandle.update_record(req['fqdn'],req['rr_type'],req['value'],options=req['options'])
+                    val = self._clean_intvalue(val)
+                    res['resource'] = "record"
+                    res['status'] = "success"
+                    res['records'] = val
+                except Exception as e:
+                    rc = 406
+                    res['status'] = "error"
+                    res['msg'] = f'{e}'
+            else:
+                rc = 400
+                res['status'] = "error"
+                res['msg'] = f'unknown resource type: {resource}'
+        except Exception as e:
+            rc = 406
+            res['status'] = "error"
+            res['msg'] = f'{e}'
+        self.send_response(rc)
+        self.send_header("Content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(bytes(json.dumps(res),"utf-8"))
+
+    def do_DELETE(self):
+        if not self._check_api_key():
+            self.send_response(401)
+            self.end_headers()
+            return
+        (resource, name, extra) = self._parse_path(self.path)
+        res = { 'status': None, 'msg': None, 'resource': None, 'records': None }
+        content_len = int(self.headers['Content-Length'])
+        data = self.rfile.read(content_len)
+        rc = 200
+        req = None
+        try:
+            req = json.loads(data)
+            if resource in ["domain", "domains"]:
+                try:
+                    val = self.server.dbhandle.delete_domain(req['fqdn'])
+                    res['resource'] = "domain"
+                    res['status'] = "success"
+                    res['records'] = val
+                except Exception as e:
+                    rc = 406
+                    res['status'] = "error"
+                    res['msg'] = f'{e}'
+            elif resource in ["record", "records"]:
+                try:
+                    val = self.server.dbhandle.delete_record(req['fqdn'])
+                    val = self._clean_intvalue(val)
+                    res['resource'] = "record"
+                    res['status'] = "success"
+                    res['records'] = val
+                except Exception as e:
+                    rc = 406
+                    res['status'] = "error"
+                    res['msg'] = f'{e}'
+            else:
+                rc = 400
+                res['status'] = "error"
+                res['msg'] = f'unknown resource type: {resource}'
+        except Exception as e:
+            rc = 406
+            res['status'] = "error"
+            res['msg'] = f'{e}'
+        self.send_response(rc)
+        self.send_header("Content-type", "application/json")
+        self.end_headers()
+        self.wfile.write(bytes(json.dumps(res),"utf-8"))
+
+    def log_message(self, format, *args):
+        print("%s - - [%s] %s" %
+                (self.address_string(),
+                    self.log_date_time_string(),
+                    format%args))
+
+def signal_cleanup(signum, frame):
+#    httpd.server_close()
+    print("server shutdown")
+
+
+def http_server(config):
+    httpd = None
+    db = ipam(database=config.get('database','type'), dbfile=config.get('database','path'))
+    server = config.get('server','listen')
+    port = config.getint('server','port')
+    api_key = config.get('server','apikey')
+
+    try:
+        httpd = IPAMDServer((server,port), IPAMDRequestHandler)
+        httpd.api_key = api_key
+        httpd.dbhandle = db
+    except OSError:
+        print("Cannot bind to {}:{}".format(server,port))
+        sys.exit(1)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    httpd.server_close()
+
+def usage():
+    print("""ipamd [-h] [-c config.ini] 
+    -c      alternate ini file
+    -h      this help
+    -d      do not daemonize
+    """)
+
+def main():
+    do_daemon = True
+    ini_files = ['/etc/ipam.ini', os.path.expanduser('~/.ipam.ini')]
+
+    sys.argv.pop(0)     # skip the command
+    while len(sys.argv) != 0:
+        if sys.argv[0][0] == "-":   # -argument
+            if sys.argv[0] == "-h":
+                usage()
+                sys.exit(1)
+            elif sys.argv[0] == "-d":
+                do_daemon = False
+            elif sys.argv[0] == "-c":
+                sys.argv.pop(0)
+                if sys.argv != []:
+                    ini_files.append(sys.argv[0])
+                else:
+                    print("required argument missing for -c")
+                    sys.exit(1)
+            sys.argv.pop(0)
+        else:
+            break;  # ran out of flags... so bail
+
+    config = configparser.ConfigParser()
+    val = config.read(ini_files)
+
+    if val == []:
+        print("no configuration found. aborting")
+        sys.exit(2)
+
+    # we cannot use the API DB type
+    if config.get('database','type') not in ['sqlite3']:
+        print("no database type specified")
+        sys.exit(1)
+
+    if config.get('database','path') == None:
+        print("no database file specified")
+        sys.exit(1)
+
+    if do_daemon == True:
+        logger = logging.getLogger('ipamd')
+        logger.setLevel(logging.DEBUG)
+        lfh = logging.FileHandler("/var/log/ipamd.log")
+        logger.addHandler(lfh)
+#        lfmt = logging.Formatter("%(levelname)s: %(message)s")
+#        logger.setFormatter(lfmt)
+        user = config.get('server','user')
+        uid=None
+        git=None
+        if user != None:
+            try:
+                u = getpwnam(user)
+            except KeyError:
+                pass
+            uid = u.pw_uid
+            gid = u.pw_uid
+        with daemon.DaemonContext(uid=uid,gid=gid,stdout=lfh.stream,stderr=lfh.stream,signal_map={signal.SIGTERM: signal_cleanup}):
+            print("starting server")
+            http_server(config)
+    else:
+        print("starting server")
+        http_server(config)
+        print("closing server")
+
+    sys.exit(0)
+
+if __name__ == "__main__":
+    main()
