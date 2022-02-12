@@ -292,6 +292,7 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
 def signal_cleanup(signum, frame):
 #    httpd.server_close()
     print("server shutdown")
+    sys.exit(0)
 
 
 def http_server(config):
