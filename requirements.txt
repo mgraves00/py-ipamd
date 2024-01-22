@@ -1,1 +1,1 @@
-python-daemon==2.3.0
+python-daemon>=2.3.0
