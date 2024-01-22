@@ -261,7 +261,7 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
                     res['msg'] = f'{e}'
             elif resource in ["record", "records"]:
                 try:
-                    val = self.server.dbhandle.delete_record(req['fqdn'])
+                    val = self.server.dbhandle.delete_record(req['fqdn'],options=req['options'])
                     val = self._clean_intvalue(val)
                     res['resource'] = "record"
                     res['status'] = "success"
