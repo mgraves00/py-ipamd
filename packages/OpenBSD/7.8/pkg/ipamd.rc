@@ -1,0 +1,10 @@
+#!/bin/ksh
+
+daemon="${TRUEPREFIX}/sbin/ipamd"
+rc_reload=NO
+
+. /etc/rc.d/rc.subr
+
+pexp="/usr/local/bin/python3 ${daemon}"
+
+rc_cmd $1
