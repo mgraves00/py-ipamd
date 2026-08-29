@@ -1,0 +1,7 @@
+**/__pycache__/**
+release/**
+*.swp
+*.ini
+*.db
+libipam
+TODO
