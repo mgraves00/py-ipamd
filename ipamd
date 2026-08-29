@@ -48,7 +48,7 @@ db = None
 api_key = None
 logger = None
 
-IPAMD_VERSION="1.0.8"
+IPAMD_VERSION="1.0.9"
 
 # extend HTTPServer so we can store the key and dbhandle
 class IPAMDServer(http.server.HTTPServer):
