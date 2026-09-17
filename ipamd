@@ -49,13 +49,19 @@ logger = None
 
 IPAMD_VERSION="1.0.9+"
 
+def get_domain(record=None):
+    if record == None:
+        return None
+    out = record.split('.')
+    return '.'.join(out[1:])
+
 # extend HTTPServer so we can store the key and dbhandle
 class IPAMDServer(http.server.HTTPServer):
     dbhandle = None
     rbac=None
 
 class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
-    # parse the API path
+    # parse the API path /api/:resource/:name/:extras
     def _parse_path(self, path):
         pathre = re.compile("/api/([^/]+)(?:/([^/]+))?(?:/(.+))?", re.IGNORECASE)
         m = pathre.match(path)
@@ -70,31 +76,54 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
         if "Authorization" in self.headers:
             authz = self.headers["Authorization"]
             user, key = authz.split(':')
+        else:
+            self._dprint(f'no user')
         return(user,key)
 
     # assumes that _check_api_key was has already verified the user
-    def _check_rbac(self, domain=None, record=None, rtype=None):
-        user, key = _get_auth()
-        if self.rbac[user]['domains'] != None:
-            if domain not in self.rbac[user]['domains']:
+    def _check_rbac(self, action=None, domain=None, resource=None, rtype=None):
+        user, key = self._get_auth()
+        az=[]
+        if self.server.rbac[user]['actions'] != None:
+            if action not in self.server.rbac[user]['actions']:
+                self._dprint(f'user {user} action {action} not authorized');
                 return False
-        if self.rbac[user]['records'] != None:
-            if record not in self.rbac[user]['records']:
+        if action != None:
+            az.append(action)
+        if self.server.rbac[user]['resources'] != None:
+            if resource not in self.server.rbac[user]['resources']:
+                self._dprint(f'user {user} resource {resource} not authorized');
                 return False
-        if self.rbac[user]['types'] != None:
-            if rtype not in self.rbac[user]['rtypes']:
+        if resource != None:
+            az.append(resource)
+        if self.server.rbac[user]['domains'] != None:
+            if domain not in self.server.rbac[user]['domains']:
+                self._dprint(f'user {user} domain {domain} not authorized');
                 return False
+        if domain != None:
+            az.append(domain)
+        if self.server.rbac[user]['types'] != None:
+            if rtype not in self.server.rbac[user]['rtypes']:
+                self._dprint(f'user {user} type {rtype} not authorized');
+                return False
+        if rtype != None:
+            az.append(rtype)
+        self._dprint(f'user {user} authorized: {" ".join(az)}');
         return True
 
     # verify that user:key is valid
     def _check_api_key(self):
-        user, key = _get_auth()
+        user, key = self._get_auth()
         if user == None or key == None:
+            self._dprint(f'no user of key found');
             return False
-        if user not in self.rbac:
+        if user not in self.server.rbac:
+            self._dprint(f'user {user} not found in rbac');
             return False
-        if key != self.rbac[user]['key']:
+        if key != self.server.rbac[user]['key']:
+            self._dprint(f'user {user} key mismatch');
             return False
+        self._dprint(f'user {user} authenticated');
         return True
 
     def _clean_intvalue(self, arr):
@@ -112,7 +141,7 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
         (resource, name, extra) = self._parse_path(self.path)
-        if not self._check_rbac(name, resource, extra):
+        if not self._check_rbac('view', get_domain(name), resource, extra):
             self.send_response(401)
             self.end_headers()
             return
@@ -177,7 +206,7 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
         (resource, name, extra) = self._parse_path(self.path)
-        if not self._check_rbac(name, resource, extra):
+        if not self._check_rbac('update', get_domain(name), resource, extra):
             self.send_response(401)
             self.end_headers()
             return
@@ -228,7 +257,7 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
         (resource, name, extra) = self._parse_path(self.path)
-        if not self._check_rbac(name, resource, extra):
+        if not self._check_rbac('create', get_domain(name), resource, extra):
             self.send_response(401)
             self.end_headers()
             return
@@ -279,7 +308,7 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
         (resource, name, extra) = self._parse_path(self.path)
-        if not self._check_rbac(name, resource, extra):
+        if not self._check_rbac('delete', get_domain(name), resource, extra):
             self.send_response(401)
             self.end_headers()
             return
@@ -325,12 +354,13 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(bytes(json.dumps(res),"utf-8"))
 
     def log_message(self, format, *args):
-        user, key = self._get_auth()
+#        user, key = self._get_auth()
+        user = 'unknown'
         print("%s %s - [%s] %s" %
                 (self.address_string(), user,
                     self.log_date_time_string(), format%args))
 
-    def _dprintf(self, *args):
+    def _dprint(self, *args):
         self.log_error(*args)
         return
 
@@ -383,19 +413,23 @@ def load_rbac_config(config):
             name = match.group(1)
             if name != None:
                 key=config_get(config,r,'key',None)
+                actions=config_get(config,r,'actions',None)
                 domains=config_get(config,r,'domains',None)
-                records=config_get(config,r,'records',None)
+                resources=config_get(config,r,'resources',None)
                 types=config_get(config,r,'types',None)
+                if actions != None:
+                    actions = actions.split(',')
                 if domains != None:
                     domains = domains.split(',')
-                if records != None:
-                    records = records.split(',')
+                if resources != None:
+                    resources = resources.split(',')
                 if types != None:
                     types = types.split(',')
                 users[name] = {
                     'key': key,
+                    'actions': actions,
                     'domains': domains,
-                    'records': records,
+                    'resources': resources,
                     'types': types
                 }
     return users
