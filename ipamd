@@ -55,6 +55,29 @@ def get_domain(record=None):
     out = record.split('.')
     return '.'.join(out[1:])
 
+# This tests the 'test' against all entries
+# int the list.  It does a regex match of
+# the ending so one.example.com will match
+# domain of example.com, but not
+# sub.example.com
+def test_domain(test=None, domains=None):
+    if test == None or domains == None:
+        return False
+    if isinstance(domains, str):
+        a=domains+'$'
+        if re.search(a, test) is not None:
+            return True
+    elif isinstance(domains, list):
+        for d in domains:
+            a=d+'$'
+            if re.search(a, test) is not None:
+                return True
+    return False
+
+# stub
+def test_network(test=None, networks=None):
+    return False
+
 # extend HTTPServer so we can store the key and dbhandle
 class IPAMDServer(http.server.HTTPServer):
     dbhandle = None
@@ -81,8 +104,9 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
         return(user,key)
 
     # assumes that _check_api_key was has already verified the user
-    def _check_rbac(self, action=None, domain=None, resource=None, rtype=None):
+    def _check_rbac(self, action=None, domain=None, network=None, resource=None, rtype=None):
         user, key = self._get_auth()
+        self._dprint(f'{self.server.rbac[user]}')
         az=[]
         if self.server.rbac[user]['actions'] != None:
             if action not in self.server.rbac[user]['actions']:
@@ -97,11 +121,17 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
         if resource != None:
             az.append(resource)
         if self.server.rbac[user]['domains'] != None:
-            if domain not in self.server.rbac[user]['domains']:
+            if not test_domain(domain, self.server.rbac[user]['domains']):
                 self._dprint(f'user {user} domain {domain} not authorized');
                 return False
         if domain != None:
             az.append(domain)
+        if self.server.rbac[user]['networks'] != None:
+            if not test_network(network, self.server.rbac[user]['networks']):
+                self._dprint(f'user {user} network {network} not authorized');
+                return False
+        if network != None:
+            az.append(networks)
         if self.server.rbac[user]['types'] != None:
             if rtype not in self.server.rbac[user]['rtypes']:
                 self._dprint(f'user {user} type {rtype} not authorized');
@@ -141,13 +171,13 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
         (resource, name, extra) = self._parse_path(self.path)
-        if not self._check_rbac('view', get_domain(name), resource, extra):
-            self.send_response(401)
-            self.end_headers()
-            return
         rc = 200
         res = { 'status': None, 'msg': None, 'resource': None, 'records': None }
         if resource in ["domain", "domains"]:
+            if not self._check_rbac('view', name, None, resource, extra):
+                self.send_response(401)
+                self.end_headers()
+                return
             try:
                 val = self.server.dbhandle.find_domain(name)
                 res['resource'] = "domain"
@@ -158,6 +188,10 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
                 res['status'] = "error"
                 res['msg'] = f'{e}'
         elif resource in ["record", "records"]:
+            if not self._check_rbac('view', get_domain(name), None, resource, extra):
+                self.send_response(401)
+                self.end_headers()
+                return
             try:
                 val = self.server.dbhandle.find_record(name)
                 val = self._clean_intvalue(val)
@@ -169,6 +203,10 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
                 res['status'] = "error"
                 res['msg'] = f'{e}'
         elif resource in ["network"]:
+            if not self._check_rbac('view', None, name+"/"+extra, resource, extra):
+                self.send_response(401)
+                self.end_headers()
+                return
             try:
                 val = self.server.dbhandle.find_network(name+"/"+extra)
                 val = self._clean_intvalue(val)
@@ -206,7 +244,7 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
         (resource, name, extra) = self._parse_path(self.path)
-        if not self._check_rbac('update', get_domain(name), resource, extra):
+        if not self._check_rbac('create', name, None, resource, extra):
             self.send_response(401)
             self.end_headers()
             return
@@ -218,6 +256,10 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
         try:
             req = json.loads(data)
             if resource in ["domain", "domains"]:
+                if not self._check_rbac('create', name, None, resource, extra):
+                    self.send_response(401)
+                    self.end_headers()
+                    return
                 try:
                     val = self.server.dbhandle.add_domain(req['fqdn'],options=req['options'])
                     res['resource'] = "domain"
@@ -228,6 +270,10 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
                     res['status'] = "error"
                     res['msg'] = f'{e}'
             elif resource in ["record", "records"]:
+                if not self._check_rbac('create', get_domain(name), None, resource, extra):
+                    self.send_response(401)
+                    self.end_headers()
+                    return
                 try:
                     val = self.server.dbhandle.add_record(req['fqdn'],req['rr_type'],req['value'],options=req['options'])
                     val = self._clean_intvalue(val)
@@ -257,10 +303,6 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
         (resource, name, extra) = self._parse_path(self.path)
-        if not self._check_rbac('create', get_domain(name), resource, extra):
-            self.send_response(401)
-            self.end_headers()
-            return
         res = { 'status': None, 'msg': None, 'resource': None, 'records': None }
         content_len = int(self.headers['Content-Length'])
         data = self.rfile.read(content_len)
@@ -269,6 +311,10 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
         try:
             req = json.loads(data)
             if resource in ["domain", "domains"]:
+                if not self._check_rbac('update', name, None, resource, extra):
+                    self.send_response(401)
+                    self.end_headers()
+                    return
                 try:
                     val = self.server.dbhandle.update_domain(req['fqdn'],options=req['options'])
                     res['resource'] = "domain"
@@ -279,6 +325,10 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
                     res['status'] = "error"
                     res['msg'] = f'{e}'
             elif resource in ["record", "records"]:
+                if not self._check_rbac('update', get_domain(name), None, resource, extra):
+                    self.send_response(401)
+                    self.end_headers()
+                    return
                 try:
                     val = self.server.dbhandle.update_record(req['fqdn'],req['rr_type'],req['value'],options=req['options'])
                     val = self._clean_intvalue(val)
@@ -308,10 +358,6 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
         (resource, name, extra) = self._parse_path(self.path)
-        if not self._check_rbac('delete', get_domain(name), resource, extra):
-            self.send_response(401)
-            self.end_headers()
-            return
         res = { 'status': None, 'msg': None, 'resource': None, 'records': None }
         content_len = int(self.headers['Content-Length'])
         data = self.rfile.read(content_len)
@@ -320,6 +366,10 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
         try:
             req = json.loads(data)
             if resource in ["domain", "domains"]:
+                if not self._check_rbac('delete', name, None, resource, extra):
+                    self.send_response(401)
+                    self.end_headers()
+                    return
                 try:
                     val = self.server.dbhandle.delete_domain(req['fqdn'])
                     res['resource'] = "domain"
@@ -330,6 +380,10 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
                     res['status'] = "error"
                     res['msg'] = f'{e}'
             elif resource in ["record", "records"]:
+                if not self._check_rbac('delete', get_domain(name), None, resource, extra):
+                    self.send_response(401)
+                    self.end_headers()
+                    return
                 try:
                     val = self.server.dbhandle.delete_record(req['fqdn'],options=req['options'])
                     val = self._clean_intvalue(val)
@@ -354,8 +408,9 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(bytes(json.dumps(res),"utf-8"))
 
     def log_message(self, format, *args):
+#NOTE: create a loop when _get_auth() doesn't find an 'authroize' header
 #        user, key = self._get_auth()
-        user = 'unknown'
+        user = '-'
         print("%s %s - [%s] %s" %
                 (self.address_string(), user,
                     self.log_date_time_string(), format%args))
@@ -415,12 +470,15 @@ def load_rbac_config(config):
                 key=config_get(config,r,'key',None)
                 actions=config_get(config,r,'actions',None)
                 domains=config_get(config,r,'domains',None)
+                networks=config_get(config,r,'networks',None)
                 resources=config_get(config,r,'resources',None)
                 types=config_get(config,r,'types',None)
                 if actions != None:
                     actions = actions.split(',')
                 if domains != None:
                     domains = domains.split(',')
+                if networks != None:
+                    networks = networks.split(',')
                 if resources != None:
                     resources = resources.split(',')
                 if types != None:
@@ -429,6 +487,7 @@ def load_rbac_config(config):
                     'key': key,
                     'actions': actions,
                     'domains': domains,
+                    'networks': networks,
                     'resources': resources,
                     'types': types
                 }
