@@ -175,59 +175,67 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
         res = { 'status': None, 'msg': None, 'resource': None, 'records': None }
         if resource in ["domain", "domains"]:
             if not self._check_rbac('view', name, None, resource, extra):
-                self.send_response(401)
-                self.end_headers()
-                return
-            try:
-                val = self.server.dbhandle.find_domain(name)
-                res['resource'] = "domain"
-                res['status'] = "success"
-                res['records'] = val
-            except Exception as e:
-                rc = 406
-                res['status'] = "error"
-                res['msg'] = f'{e}'
+                rc = 401
+                res['status'] = 'error'
+                res['msg'] = "not authorized"
+            else:
+                try:
+                    val = self.server.dbhandle.find_domain(name)
+                    res['resource'] = "domain"
+                    res['status'] = "success"
+                    res['records'] = val
+                except Exception as e:
+                    rc = 406
+                    res['status'] = "error"
+                    res['msg'] = f'{e}'
         elif resource in ["record", "records"]:
             if not self._check_rbac('view', get_domain(name), None, resource, extra):
-                self.send_response(401)
-                self.end_headers()
-                return
-            try:
-                val = self.server.dbhandle.find_record(name)
-                val = self._clean_intvalue(val)
-                res['resource'] = "record"
-                res['status'] = "success"
-                res['records'] = val
-            except Exception as e:
-                rc = 406
-                res['status'] = "error"
-                res['msg'] = f'{e}'
+                rc = 401
+                res['status'] = 'error'
+                res['msg'] = "not authorized"
+            else:
+                try:
+                    val = self.server.dbhandle.find_record(name)
+                    val = self._clean_intvalue(val)
+                    res['resource'] = "record"
+                    res['status'] = "success"
+                    res['records'] = val
+                except Exception as e:
+                    rc = 406
+                    res['status'] = "error"
+                    res['msg'] = f'{e}'
         elif resource in ["network"]:
             if not self._check_rbac('view', None, name+"/"+extra, resource, extra):
-                self.send_response(401)
-                self.end_headers()
-                return
-            try:
-                val = self.server.dbhandle.find_network(name+"/"+extra)
-                val = self._clean_intvalue(val)
-                res['resource'] = "network"
-                res['status'] = "success"
-                res['records'] = val
-            except Exception as e:
-                rc = 406
-                res['status'] = "error"
-                res['msg'] = f'{e}'
+                rc = 401
+                res['status'] = 'error'
+                res['msg'] = "not authorized"
+            else:
+                try:
+                    val = self.server.dbhandle.find_network(name+"/"+extra)
+                    val = self._clean_intvalue(val)
+                    res['resource'] = "network"
+                    res['status'] = "success"
+                    res['records'] = val
+                except Exception as e:
+                    rc = 406
+                    res['status'] = "error"
+                    res['msg'] = f'{e}'
         elif resource in ["address"]:
-            try:
-                val = self.server.dbhandle.find_address(name)
-                val = self._clean_intvalue(val)
-                res['resource'] = "address"
-                res['status'] = "success"
-                res['records'] = val
-            except Exception as e:
-                rc = 406
-                res['status'] = "error"
-                res['msg'] = f'{e}'
+            if not self._check_rbac('view', None, name+"/32", resource, extra):
+                rc = 401
+                res['status'] = 'error'
+                res['msg'] = "not authorized"
+            else:
+                try:
+                    val = self.server.dbhandle.find_address(name)
+                    val = self._clean_intvalue(val)
+                    res['resource'] = "address"
+                    res['status'] = "success"
+                    res['records'] = val
+                except Exception as e:
+                    rc = 406
+                    res['status'] = "error"
+                    res['msg'] = f'{e}'
         else:
             rc = 400
             res['status'] = "error"
@@ -244,10 +252,6 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
         (resource, name, extra) = self._parse_path(self.path)
-        if not self._check_rbac('create', name, None, resource, extra):
-            self.send_response(401)
-            self.end_headers()
-            return
         res = { 'status': None, 'msg': None, 'resource': None, 'records': None }
         content_len = int(self.headers['Content-Length'])
         data = self.rfile.read(content_len)
@@ -257,33 +261,35 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
             req = json.loads(data)
             if resource in ["domain", "domains"]:
                 if not self._check_rbac('create', name, None, resource, extra):
-                    self.send_response(401)
-                    self.end_headers()
-                    return
-                try:
-                    val = self.server.dbhandle.add_domain(req['fqdn'],options=req['options'])
-                    res['resource'] = "domain"
-                    res['status'] = "success"
-                    res['records'] = val
-                except Exception as e:
-                    rc = 406
-                    res['status'] = "error"
-                    res['msg'] = f'{e}'
+                    rc = 401
+                    res['status'] = 'error'
+                    res['msg'] = "not authorized"
+                else:
+                    try:
+                        val = self.server.dbhandle.add_domain(req['fqdn'],options=req['options'])
+                        res['resource'] = "domain"
+                        res['status'] = "success"
+                        res['records'] = val
+                    except Exception as e:
+                        rc = 406
+                        res['status'] = "error"
+                        res['msg'] = f'{e}'
             elif resource in ["record", "records"]:
                 if not self._check_rbac('create', get_domain(name), None, resource, extra):
-                    self.send_response(401)
-                    self.end_headers()
-                    return
-                try:
-                    val = self.server.dbhandle.add_record(req['fqdn'],req['rr_type'],req['value'],options=req['options'])
-                    val = self._clean_intvalue(val)
-                    res['resource'] = "record"
-                    res['status'] = "success"
-                    res['records'] = val
-                except Exception as e:
-                    rc = 406
-                    res['status'] = "error"
-                    res['msg'] = f'{e}'
+                    rc = 401
+                    res['status'] = 'error'
+                    res['msg'] = "not authorized"
+                else:
+                    try:
+                        val = self.server.dbhandle.add_record(req['fqdn'],req['rr_type'],req['value'],options=req['options'])
+                        val = self._clean_intvalue(val)
+                        res['resource'] = "record"
+                        res['status'] = "success"
+                        res['records'] = val
+                    except Exception as e:
+                        rc = 406
+                        res['status'] = "error"
+                        res['msg'] = f'{e}'
             else:
                 rc = 400
                 res['status'] = "error"
@@ -312,33 +318,35 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
             req = json.loads(data)
             if resource in ["domain", "domains"]:
                 if not self._check_rbac('update', name, None, resource, extra):
-                    self.send_response(401)
-                    self.end_headers()
-                    return
-                try:
-                    val = self.server.dbhandle.update_domain(req['fqdn'],options=req['options'])
-                    res['resource'] = "domain"
-                    res['status'] = "success"
-                    res['records'] = val
-                except Exception as e:
-                    rc = 406
-                    res['status'] = "error"
-                    res['msg'] = f'{e}'
+                    rc = 401
+                    res['status'] = 'error'
+                    res['msg'] = "not authorized"
+                else:
+                    try:
+                        val = self.server.dbhandle.update_domain(req['fqdn'],options=req['options'])
+                        res['resource'] = "domain"
+                        res['status'] = "success"
+                        res['records'] = val
+                    except Exception as e:
+                        rc = 406
+                        res['status'] = "error"
+                        res['msg'] = f'{e}'
             elif resource in ["record", "records"]:
                 if not self._check_rbac('update', get_domain(name), None, resource, extra):
-                    self.send_response(401)
-                    self.end_headers()
-                    return
-                try:
-                    val = self.server.dbhandle.update_record(req['fqdn'],req['rr_type'],req['value'],options=req['options'])
-                    val = self._clean_intvalue(val)
-                    res['resource'] = "record"
-                    res['status'] = "success"
-                    res['records'] = val
-                except Exception as e:
-                    rc = 406
-                    res['status'] = "error"
-                    res['msg'] = f'{e}'
+                    rc = 401
+                    res['status'] = 'error'
+                    res['msg'] = "not authorized"
+                else:
+                    try:
+                        val = self.server.dbhandle.update_record(req['fqdn'],req['rr_type'],req['value'],options=req['options'])
+                        val = self._clean_intvalue(val)
+                        res['resource'] = "record"
+                        res['status'] = "success"
+                        res['records'] = val
+                    except Exception as e:
+                        rc = 406
+                        res['status'] = "error"
+                        res['msg'] = f'{e}'
             else:
                 rc = 400
                 res['status'] = "error"
@@ -367,33 +375,35 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
             req = json.loads(data)
             if resource in ["domain", "domains"]:
                 if not self._check_rbac('delete', name, None, resource, extra):
-                    self.send_response(401)
-                    self.end_headers()
-                    return
-                try:
-                    val = self.server.dbhandle.delete_domain(req['fqdn'])
-                    res['resource'] = "domain"
-                    res['status'] = "success"
-                    res['records'] = val
-                except Exception as e:
-                    rc = 406
-                    res['status'] = "error"
-                    res['msg'] = f'{e}'
+                    rc = 401
+                    res['status'] = 'error'
+                    res['msg'] = "not authorized"
+                else:
+                    try:
+                        val = self.server.dbhandle.delete_domain(req['fqdn'])
+                        res['resource'] = "domain"
+                        res['status'] = "success"
+                        res['records'] = val
+                    except Exception as e:
+                        rc = 406
+                        res['status'] = "error"
+                        res['msg'] = f'{e}'
             elif resource in ["record", "records"]:
                 if not self._check_rbac('delete', get_domain(name), None, resource, extra):
-                    self.send_response(401)
-                    self.end_headers()
-                    return
-                try:
-                    val = self.server.dbhandle.delete_record(req['fqdn'],options=req['options'])
-                    val = self._clean_intvalue(val)
-                    res['resource'] = "record"
-                    res['status'] = "success"
-                    res['records'] = val
-                except Exception as e:
-                    rc = 406
-                    res['status'] = "error"
-                    res['msg'] = f'{e}'
+                    rc = 401
+                    res['status'] = 'error'
+                    res['msg'] = "not authorized"
+                else:
+                    try:
+                        val = self.server.dbhandle.delete_record(req['fqdn'],options=req['options'])
+                        val = self._clean_intvalue(val)
+                        res['resource'] = "record"
+                        res['status'] = "success"
+                        res['records'] = val
+                    except Exception as e:
+                        rc = 406
+                        res['status'] = "error"
+                        res['msg'] = f'{e}'
             else:
                 rc = 400
                 res['status'] = "error"
