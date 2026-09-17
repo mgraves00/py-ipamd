@@ -45,17 +45,17 @@ import signal
 from pwd import getpwnam
 
 db = None
-api_key = None
 logger = None
 
-IPAMD_VERSION="1.0.9"
+IPAMD_VERSION="1.0.9+"
 
 # extend HTTPServer so we can store the key and dbhandle
 class IPAMDServer(http.server.HTTPServer):
     dbhandle = None
-    api_key = None
+    rbac=None
 
 class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
+    # parse the API path
     def _parse_path(self, path):
         pathre = re.compile("/api/([^/]+)(?:/([^/]+))?(?:/(.+))?", re.IGNORECASE)
         m = pathre.match(path)
@@ -63,17 +63,39 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
             return((None,None,None))
         return(m.groups())
 
-    def _check_api_key(self):
-        client_key = None
+    # extract the user:key from HTTP headers
+    def _get_auth(self):
+        user = None
+        key = None
         if "Authorization" in self.headers:
-            client_key = self.headers["Authorization"]
-        else:
-#            print(f'client api key missing')
+            authz = self.headers["Authorization"]
+            user, key = authz.split(':')
+        return(user,key)
+
+    # assumes that _check_api_key was has already verified the user
+    def _check_rbac(self, domain=None, record=None, rtype=None):
+        user, key = _get_auth()
+        if self.rbac[user]['domains'] != None:
+            if domain not in self.rbac[user]['domains']:
+                return False
+        if self.rbac[user]['records'] != None:
+            if record not in self.rbac[user]['records']:
+                return False
+        if self.rbac[user]['types'] != None:
+            if rtype not in self.rbac[user]['rtypes']:
+                return False
+        return True
+
+    # verify that user:key is valid
+    def _check_api_key(self):
+        user, key = _get_auth()
+        if user == None or key == None:
             return False
-        if self.server.api_key == client_key:
-            return True
-#        print(f'client api key mismatch "{client_key}"')
-        return False
+        if user not in self.rbac:
+            return False
+        if key != self.rbac[user]['key']:
+            return False
+        return True
 
     def _clean_intvalue(self, arr):
         ret = []
@@ -90,6 +112,10 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
         (resource, name, extra) = self._parse_path(self.path)
+        if not self._check_rbac(name, resource, extra):
+            self.send_response(401)
+            self.end_headers()
+            return
         rc = 200
         res = { 'status': None, 'msg': None, 'resource': None, 'records': None }
         if resource in ["domain", "domains"]:
@@ -151,6 +177,10 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
         (resource, name, extra) = self._parse_path(self.path)
+        if not self._check_rbac(name, resource, extra):
+            self.send_response(401)
+            self.end_headers()
+            return
         res = { 'status': None, 'msg': None, 'resource': None, 'records': None }
         content_len = int(self.headers['Content-Length'])
         data = self.rfile.read(content_len)
@@ -198,6 +228,10 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
         (resource, name, extra) = self._parse_path(self.path)
+        if not self._check_rbac(name, resource, extra):
+            self.send_response(401)
+            self.end_headers()
+            return
         res = { 'status': None, 'msg': None, 'resource': None, 'records': None }
         content_len = int(self.headers['Content-Length'])
         data = self.rfile.read(content_len)
@@ -245,6 +279,10 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             return
         (resource, name, extra) = self._parse_path(self.path)
+        if not self._check_rbac(name, resource, extra):
+            self.send_response(401)
+            self.end_headers()
+            return
         res = { 'status': None, 'msg': None, 'resource': None, 'records': None }
         content_len = int(self.headers['Content-Length'])
         data = self.rfile.read(content_len)
@@ -287,10 +325,10 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(bytes(json.dumps(res),"utf-8"))
 
     def log_message(self, format, *args):
-        print("%s - - [%s] %s" %
-                (self.address_string(),
-                    self.log_date_time_string(),
-                    format%args))
+        user, key = self._get_auth()
+        print("%s %s - [%s] %s" %
+                (self.address_string(), user,
+                    self.log_date_time_string(), format%args))
 
 def signal_cleanup(signum, frame):
 #    httpd.server_close()
@@ -303,11 +341,14 @@ def http_server(config):
     db = ipam(database=config.get('database','type'), dbfile=config.get('database','path'))
     server = config.get('server','listen')
     port = config.getint('server','port')
-    api_key = config.get('server','apikey')
+    rbac = load_rbac_config(config)
+    if rbac == None:
+        print("no rbac settings found")
+        sys.exit(1)
 
     try:
         httpd = IPAMDServer((server,port), IPAMDRequestHandler)
-        httpd.api_key = api_key
+        httpd.rbac = rbac
         httpd.dbhandle = db
     except OSError:
         print("Cannot bind to {}:{}".format(server,port))
@@ -325,6 +366,45 @@ def usage():
     -d      do not daemonize
     -v      show version
     """)
+
+def load_rbac_config(config):
+    users={}
+    if config == None:
+        return None
+
+    for r in config:
+        re_rbac = re.compile('^rbac_(.*)$')
+        match = re_rbac.match(r)
+        if match != None:
+            name = match.group(1)
+            if name != None:
+                try:
+                    key=config.get(r,'key')
+                except:
+                    key=None
+                try:
+                    domains=config.get(r,'domains')
+                    domains=domains.split(',')
+                except:
+                    domains=None
+                try:
+                    records=config.get(r,'records')
+                    records=records.split(',')
+                except:
+                    records=None
+                try:
+                    types=config.get(r,'types')
+                    types=types.split(',')
+                except:
+                    types=None
+                users[name] = {
+                    'key': key,
+                    'domains': domains,
+                    'records': records,
+                    'types': types
+                }
+
+    return users
 
 def main():
     do_daemon = True
