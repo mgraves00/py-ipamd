@@ -330,6 +330,10 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
                 (self.address_string(), user,
                     self.log_date_time_string(), format%args))
 
+    def _dprintf(self, *args):
+        self.log_error(*args)
+        return
+
 def signal_cleanup(signum, frame):
 #    httpd.server_close()
     print("server shutdown")
@@ -338,9 +342,10 @@ def signal_cleanup(signum, frame):
 
 def http_server(config):
     httpd = None
-    db = ipam(database=config.get('database','type'), dbfile=config.get('database','path'))
-    server = config.get('server','listen')
-    port = config.getint('server','port')
+    db = ipam(database=config_get(config,'database','type'), dbfile=config_get(config,'database','path'))
+    server = config_get(config,'server','listen')
+    port = config_get(config,'server','port')
+    port = int(port)
     rbac = load_rbac_config(config)
     if rbac == None:
         print("no rbac settings found")
@@ -371,40 +376,38 @@ def load_rbac_config(config):
     users={}
     if config == None:
         return None
-
     for r in config:
         re_rbac = re.compile('^rbac_(.*)$')
         match = re_rbac.match(r)
         if match != None:
             name = match.group(1)
             if name != None:
-                try:
-                    key=config.get(r,'key')
-                except:
-                    key=None
-                try:
-                    domains=config.get(r,'domains')
-                    domains=domains.split(',')
-                except:
-                    domains=None
-                try:
-                    records=config.get(r,'records')
-                    records=records.split(',')
-                except:
-                    records=None
-                try:
-                    types=config.get(r,'types')
-                    types=types.split(',')
-                except:
-                    types=None
+                key=config_get(config,r,'key',None)
+                domains=config_get(config,r,'domains',None)
+                records=config_get(config,r,'records',None)
+                types=config_get(config,r,'types',None)
+                if domains != None:
+                    domains = domains.split(',')
+                if records != None:
+                    records = records.split(',')
+                if types != None:
+                    types = types.split(',')
                 users[name] = {
                     'key': key,
                     'domains': domains,
                     'records': records,
                     'types': types
                 }
-
     return users
+
+def config_get(config=None, section=None, item=None, default=None):
+    if config == None or section == None or item == None:
+        return None
+    try:
+        val = config.get(section,item)
+    except:
+        val = default
+    return val
 
 def main():
     do_daemon = True
@@ -434,28 +437,27 @@ def main():
 
     config = configparser.ConfigParser()
     val = config.read(ini_files)
+    logfile = config_get(config,'server','logfile','/var/log/ipamd.log')
 
     if val == []:
         print("no configuration found. aborting")
         sys.exit(2)
 
     # we cannot use the API DB type
-    if config.get('database','type') not in ['sqlite3']:
+    if config_get(config,'database','type') not in ['sqlite3']:
         print("no database type specified")
         sys.exit(1)
 
-    if config.get('database','path') == None:
+    if config_get(config,'database','path') == None:
         print("no database file specified")
         sys.exit(1)
 
     if do_daemon == True:
         logger = logging.getLogger('ipamd')
         logger.setLevel(logging.DEBUG)
-        lfh = logging.FileHandler("/var/log/ipamd.log")
+        lfh = logging.FileHandler(logfile)
         logger.addHandler(lfh)
-#        lfmt = logging.Formatter("%(levelname)s: %(message)s")
-#        logger.setFormatter(lfmt)
-        user = config.get('server','user')
+        user = config_get(config,'server','user')
         uid=None
         git=None
         if user != None:
