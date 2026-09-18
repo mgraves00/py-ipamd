@@ -380,7 +380,7 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
                     res['msg'] = "not authorized"
                 else:
                     try:
-                        val = self.server.dbhandle.delete_domain(req['fqdn'])
+                        val = self.server.dbhandle.delete_domain(req['fqdn'], force=req.get('force',False) )
                         res['resource'] = "domain"
                         res['status'] = "success"
                         res['records'] = val
@@ -395,7 +395,7 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
                     res['msg'] = "not authorized"
                 else:
                     try:
-                        val = self.server.dbhandle.delete_record(req['fqdn'],options=req['options'])
+                        val = self.server.dbhandle.delete_record(req['fqdn'],force=req.get('force',False),options=req['options'])
                         val = self._clean_intvalue(val)
                         res['resource'] = "record"
                         res['status'] = "success"
