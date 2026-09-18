@@ -106,38 +106,37 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
     # assumes that _check_api_key was has already verified the user
     def _check_rbac(self, action=None, domain=None, network=None, resource=None, rtype=None):
         user, key = self._get_auth()
-        self._dprint(f'{self.server.rbac[user]}')
         az=[]
         if self.server.rbac[user]['actions'] != None:
             if action not in self.server.rbac[user]['actions']:
                 self._dprint(f'user {user} action {action} not authorized');
                 return False
         if action != None:
-            az.append(action)
+            az.append(f'action={action}')
         if self.server.rbac[user]['resources'] != None:
             if resource not in self.server.rbac[user]['resources']:
                 self._dprint(f'user {user} resource {resource} not authorized');
                 return False
         if resource != None:
-            az.append(resource)
+            az.append(f'resource={resource}')
         if self.server.rbac[user]['domains'] != None:
             if not test_domain(domain, self.server.rbac[user]['domains']):
                 self._dprint(f'user {user} domain {domain} not authorized');
                 return False
         if domain != None:
-            az.append(domain)
+            az.append(f'domain={domain}')
         if self.server.rbac[user]['networks'] != None:
             if not test_network(network, self.server.rbac[user]['networks']):
                 self._dprint(f'user {user} network {network} not authorized');
                 return False
         if network != None:
-            az.append(networks)
+            az.append(f'network={network}')
         if self.server.rbac[user]['types'] != None:
             if rtype not in self.server.rbac[user]['rtypes']:
                 self._dprint(f'user {user} type {rtype} not authorized');
                 return False
         if rtype != None:
-            az.append(rtype)
+            az.append(f'rtype={rtype}')
         self._dprint(f'user {user} authorized: {" ".join(az)}');
         return True
 
