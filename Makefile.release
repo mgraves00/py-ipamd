@@ -19,7 +19,7 @@ all:
 	@echo "  release  - update versions. make package. update distfile. create a release. tag tree"
 	@echo "  push_release - push release to git"
 
-release: update_version make_package update_distfile
+release: update_distfile
 	git tag v${VER}
 
 push_release: release
@@ -33,12 +33,12 @@ update_version:
 	sed -i 's/\(V = *\).*/\1${VER}/' ${obsd_pkg_dir}/Makefile
 	-git commit -m "touch version" ${obsd_pkg_dir}/Makefile ipamd
 
-make_package:
+make_package: update_version
 	mkdir -p ${.CURDIR}/${RELPATH}/${RELNAME}/src/libipam
 	for f in ${FILES}; do cp $$f ${.CURDIR}/${RELPATH}/${RELNAME}/$$f; done
 	tar -C ${.CURDIR}/${RELPATH}/ -czf ${.CURDIR}/${RELPATH}/${RELNAME}.tar.gz ${RELNAME}/
 
-update_distfile:
+update_distfile: make_package
 	ck="${.CURDIR}/${obsd_pkg_dir}/DISTFILE.new"; \
 	trap "rm -f $$ck; exit 1" 1 2 3 13 15; \
 	cd ${.CURDIR}/${RELPATH}; \
