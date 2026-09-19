@@ -6,3 +6,5 @@ release/**
 libipam
 TODO
 regress/*
+*.patch
+*.ignore
