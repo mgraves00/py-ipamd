@@ -176,7 +176,17 @@ class IPAMDRequestHandler(http.server.BaseHTTPRequestHandler):
         (resource, name, extra) = self._parse_path(self.path)
         rc = 200
         res = { 'status': None, 'msg': None, 'resource': None, 'records': None }
-        if resource in ["domain", "domains"]:
+        if resource in ['version']:
+            try:
+                res['resource'] = "version"
+                res['status'] = "success"
+                res['records'] =  { 'ipamd': IPAMD_VERSION, 'libipam': ipam.VERSION,
+                                        'database': self.server.dbhandle.version() }
+            except Exception as e:
+                rc = 406
+                res['status'] = "error"
+                res['msg'] = f'{e}'
+        elif resource in ["domain", "domains"]:
             if not self._check_rbac('view', name, None, resource, extra):
                 rc = 401
                 res['status'] = 'error'
