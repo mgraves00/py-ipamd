@@ -47,7 +47,7 @@ from pwd import getpwnam
 db = None
 logger = None
 
-IPAMD_VERSION="1.1.0"
+IPAMD_VERSION="1.1.1"
 
 def get_domain(record=None):
     if record == None:
