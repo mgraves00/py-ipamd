@@ -1,0 +1,5 @@
+@rcscript ${RCDIR}/ipamd
+sbin/ipamd
+share/examples/ipamd/
+share/examples/ipamd/ipam.ini.md
+share/examples/ipamd/ipamd.md
