@@ -15,14 +15,14 @@ FILES= LICENSE \
 		ipamd
 
 all:
-	@echo "targets:"
-	@echo "  release  - update versions. make package. update distfile. create a release. tag tree"
+	@echo "targets: (when in doubt got in reverse order)"
 	@echo "  push_release - push release to git"
+	@echo "  release  - update versions. make package. update distfile. create a release. tag tree"
 	@echo "  update_distfile - update distfile hash and size of the package"
 	@echo "  make_package - create a new package"
 	@echo "  update_version - update version numbers in files"
 
-release: update_distfile
+release: update_version make_package update_distfile
 	git tag v${VER}
 
 push_release:
