@@ -1,7 +1,7 @@
 #
 COMMENT =		daemon for manipulating simple IPAM database from clients
 
-V =1.1.0
+V =1.1.1
 MODPY_EGG_VERSION =	${V}
 #REVISION =		3
 DISTNAME =		py-ipamd-${V}
