@@ -4,7 +4,7 @@ BASENAME=py-ipamd
 RELNAME=${BASENAME}-${VER}
 RELPATH=release
 
-obsd_pkg_dir=packages/OpenBSD/7.9
+obsd_pkg_dir=packages/OpenBSD/8.0
 _size_fragment = perl -e '$$s = (stat $$ARGV[0])[7]; print "SIZE ($$ARGV[1]) = $$s\n";'
 
 FILES= LICENSE \
@@ -18,11 +18,12 @@ all:
 	@echo "targets:"
 	@echo "  release  - update versions. make package. update distfile. create a release. tag tree"
 	@echo "  push_release - push release to git"
+	@echo "  update_distfile - update distfile hash and size"
 
 release: update_distfile
 	git tag v${VER}
 
-push_release: release
+push_release:
 	git push origin --tags
 	@echo "version updated to ${VER}"
 	@echo "updates pushed to origin."
