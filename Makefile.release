@@ -1,5 +1,5 @@
 #
-VER=1.1.1
+VER=1.1.2
 BASENAME=py-ipamd
 RELNAME=${BASENAME}-${VER}
 RELPATH=release
@@ -23,7 +23,7 @@ all:
 	@echo "  make_package - create a new package"
 	@echo "  update_version - update version numbers in files"
 
-release:
+release: update_version make_package update_distfile
 	git tag v${VER}
 
 push_release:
