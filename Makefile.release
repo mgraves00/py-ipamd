@@ -4,7 +4,8 @@ BASENAME=py-ipamd
 RELNAME=${BASENAME}-${VER}
 RELPATH=release
 
-obsd_pkg_dir=packages/OpenBSD/8.0
+obsd_pkg_dir=packages/OpenBSD
+obsd_versions!=ls ${obsd_pkg_dir}/
 _size_fragment = perl -e '$$s = (stat $$ARGV[0])[7]; print "SIZE ($$ARGV[1]) = $$s\n";'
 
 FILES= LICENSE \
@@ -22,7 +23,7 @@ all:
 	@echo "  make_package - create a new package"
 	@echo "  update_version - update version numbers in files"
 
-release: update_version make_package update_distfile
+release:
 	git tag v${VER}
 
 push_release:
@@ -33,8 +34,8 @@ push_release:
 
 update_version:
 	sed -i 's/\(IPAMD_VERSION *= *\).*/\1"${VER}"/' ipamd
-	sed -i 's/\(V = *\).*/\1${VER}/' ${obsd_pkg_dir}/Makefile
-	-git commit -m "touch version" ${obsd_pkg_dir}/Makefile ipamd
+	for f in ${obsd_versions}; do sed -i 's/\(V = *\).*/\1${VER}/' ${obsd_pkg_dir}/$$f/Makefile; done
+	-git commit -m "update version" ${obsd_pkg_dir}/*/Makefile ipamd
 
 make_package:
 	[ -f ${.CURDIR}/${RELPATH}/${RELNAME}.tar.gz ] || (\
@@ -43,11 +44,13 @@ make_package:
 	tar -C ${.CURDIR}/${RELPATH}/ -czf ${.CURDIR}/${RELPATH}/${RELNAME}.tar.gz ${RELNAME}/ )
 
 update_distfile:
-	ck="${.CURDIR}/${obsd_pkg_dir}/DISTFILE.new"; \
-	trap "rm -f $$ck; exit 1" 1 2 3 13 15; \
-	cd ${.CURDIR}/${RELPATH}; \
-	cksum -b -a SHA256 -- ${RELNAME}.tar.gz >> $$ck; \
-	${_size_fragment} ${RELNAME}.tar.gz ${RELNAME}.tar.gz >> $$ck; \
-	mv -f $$ck ${.CURDIR}/${obsd_pkg_dir}/distinfo
-	-git commit -m "update checksum" ${.CURDIR}/${obsd_pkg_dir}/distinfo
+	for f in ${obsd_versions}; do \
+		ck="${.CURDIR}/${obsd_pkg_dir}/$$f/DISTFILE.new"; \
+		trap "rm -f $$ck; exit 1" 1 2 3 13 15; \
+		cd ${.CURDIR}/${RELPATH}; \
+		cksum -b -a SHA256 -- ${RELNAME}.tar.gz >> $$ck; \
+		${_size_fragment} ${RELNAME}.tar.gz ${RELNAME}.tar.gz >> $$ck; \
+		mv -f $$ck ${.CURDIR}/${obsd_pkg_dir}/$$f/distinfo; \
+	done
+	-git commit -m "update distinfo" ${.CURDIR}/${obsd_pkg_dir}/*/distinfo
 
